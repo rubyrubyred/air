@@ -9,10 +9,26 @@ const Scene: React.FC = () => {
   const [webglError, setWebglError] = useState<string | null>(null);
   const [canvasInitialized, setCanvasInitialized] = useState(false);
 
+  // Early WebGL support check
+  useEffect(() => {
+    // Quick check if WebGL is supported at all
+    const testCanvas = document.createElement('canvas');
+    const testGl = testCanvas.getContext('webgl') || 
+                   testCanvas.getContext('webgl2') || 
+                   testCanvas.getContext('experimental-webgl');
+    
+    if (!testGl) {
+      console.warn('⚠️ WebGL may not be supported in this browser');
+      // Don't set error immediately, let Canvas try first
+    } else {
+      console.log('✅ WebGL support detected');
+    }
+  }, []);
+
   // Only show error if Canvas failed to initialize after a reasonable timeout
   useEffect(() => {
     if (!canvasInitialized && !webglError) {
-      // Give Canvas 3 seconds to initialize before showing error
+      // Give Canvas 5 seconds to initialize before showing error (increased from 3)
       const timeout = setTimeout(() => {
         if (!canvasInitialized) {
           // Check if Canvas actually exists and has context
@@ -21,12 +37,16 @@ const Scene: React.FC = () => {
             const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
             if (!gl) {
               setWebglError('WebGL context creation failed');
+            } else {
+              // Canvas exists and has context, but onCreated wasn't called
+              // This might be a timing issue, give it more time
+              console.warn('⚠️ Canvas exists but not initialized yet');
             }
           } else {
             setWebglError('Canvas initialization timeout');
           }
         }
-      }, 3000);
+      }, 5000); // Increased timeout to 5 seconds
       
       return () => clearTimeout(timeout);
     }
@@ -60,47 +80,69 @@ const Scene: React.FC = () => {
     <div className={`fixed inset-0 z-0 transition-opacity duration-[1500ms] ${phase === AppPhase.MORPHING ? 'opacity-0' : 'opacity-100'}`} style={{ width: '100%', height: '100%' }}>
       <Canvas 
         camera={{ position: [0, 0, 5], fov: 75 }}
-        gl={{ 
+        gl={{
           antialias: true,
           alpha: false,
-          powerPreference: 'high-performance',
-          preserveDrawingBuffer: false
+          depth: true,
+          stencil: false,
+          preserveDrawingBuffer: false,
+          powerPreference: 'default', // Use 'default' instead of 'high-performance' for better compatibility
+          failIfMajorPerformanceCaveat: false,
+          premultipliedAlpha: false,
+          desynchronized: false
         }}
         dpr={Math.min(window.devicePixelRatio, 2)}
         style={{ width: '100%', height: '100%', display: 'block' }}
-        onCreated={({ gl, scene }) => {
+        onCreated={({ gl, scene, camera }) => {
           try {
+            // Verify WebGL context is valid
+            if (!gl || !gl.getParameter) {
+              throw new Error('Invalid WebGL context');
+            }
+            
             // Mark Canvas as initialized
             setCanvasInitialized(true);
             setWebglError(null); // Clear any previous error
             
+            // Set clear color and clear the canvas
             gl.setClearColor('#000000', 1);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             
             // Log WebGL info for debugging
             try {
-              const debugInfo = gl.getParameter(gl.DEBUG_RENDERER_INFO);
-              if (debugInfo) {
-                const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-                const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
-                console.log('✅ WebGL Renderer:', renderer);
-                console.log('✅ WebGL Vendor:', vendor);
+              const version = gl.getParameter(gl.VERSION);
+              const shadingLanguageVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+              console.log('✅ WebGL Version:', version);
+              console.log('✅ GLSL Version:', shadingLanguageVersion);
+              
+              // Try to get debug info (may not be available in all browsers)
+              try {
+                const debugInfo = gl.getParameter(gl.DEBUG_RENDERER_INFO);
+                if (debugInfo) {
+                  const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                  const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                  console.log('✅ WebGL Renderer:', renderer);
+                  console.log('✅ WebGL Vendor:', vendor);
+                }
+              } catch (debugError) {
+                // Debug info not available, that's okay
+                console.log('ℹ️ Debug info unavailable (normal in some browsers)');
               }
-            } catch (debugError) {
-              // Debug info might not be available in all contexts
-              console.log('✅ WebGL context created (debug info unavailable)');
+              
+              console.log('✅ Canvas initialized successfully');
+            } catch (logError) {
+              console.warn('⚠️ Could not log WebGL info:', logError);
             }
-            
-            const version = gl.getParameter(gl.VERSION);
-            const shadingLanguageVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
-            console.log('✅ WebGL Version:', version);
-            console.log('✅ GLSL Version:', shadingLanguageVersion);
-            console.log('✅ Canvas initialized successfully');
           } catch (error) {
             console.error('❌ Canvas initialization error:', error);
             setCanvasInitialized(false);
-            setWebglError('Canvas initialization failed: ' + (error instanceof Error ? error.message : String(error)));
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            setWebglError('Canvas 初始化失败: ' + errorMessage);
           }
+        }}
+        onError={(error) => {
+          console.error('❌ Canvas error event:', error);
+          setWebglError('Canvas 错误: ' + (error?.message || '未知错误'));
         }}
       >
         <Suspense fallback={null}>
