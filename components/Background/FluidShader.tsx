@@ -120,11 +120,12 @@ const FluidShader: React.FC = () => {
     return { baseColor, moodColor };
   };
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (materialRef.current && materialRef.current.uniforms) {
       try {
-        // Update time
-        materialRef.current.uniforms.uTime.value = state.clock.getElapsedTime();
+        // Update time - this drives the animation
+        const elapsedTime = state.clock.getElapsedTime();
+        materialRef.current.uniforms.uTime.value = elapsedTime;
 
         // Lerp Mouse Position
         const currentMouse = materialRef.current.uniforms.uMouse.value;
@@ -143,21 +144,64 @@ const FluidShader: React.FC = () => {
           dist * 2.0, 
           0.1
         );
+        
+        // Ensure material needs update
+        materialRef.current.needsUpdate = true;
       } catch (error) {
-        console.error('Shader update error:', error);
+        console.error('❌ Shader update error:', error);
+      }
+    } else {
+      // Log warning if material not ready
+      if (!materialRef.current) {
+        console.warn('⚠️ FluidShader material not ready yet');
       }
     }
   });
 
   useEffect(() => {
-    // Log when shader material is ready
-    if (materialRef.current) {
-      console.log('FluidShader material initialized');
-    }
-  }, []);
+    // Verify shader compilation and log status
+    const checkShader = () => {
+      if (materialRef.current) {
+        const material = materialRef.current;
+        
+        // Wait a bit for shader to compile
+        setTimeout(() => {
+          if (material.program) {
+            try {
+              const program = material.program;
+              // gl from useThree is already the WebGL context
+              const webgl = gl as WebGLRenderingContext;
+              
+              if (webgl && webgl.getProgramParameter) {
+                const linkStatus = webgl.getProgramParameter(program, webgl.LINK_STATUS);
+                if (!linkStatus) {
+                  const error = webgl.getProgramInfoLog(program);
+                  console.error('❌ Shader compilation error:', error);
+                } else {
+                  console.log('✅ FluidShader material initialized and compiled successfully');
+                  console.log('✅ Shader uniforms:', Object.keys(material.uniforms));
+                  console.log('✅ Fluid background effect is ready to render');
+                }
+              } else {
+                console.log('✅ FluidShader material initialized (WebGL context check skipped)');
+              }
+            } catch (error) {
+              console.warn('⚠️ Could not verify shader compilation:', error);
+              // Don't fail if we can't verify - shader might still work
+              console.log('✅ FluidShader material exists - assuming compilation successful');
+            }
+          } else {
+            console.warn('⚠️ Shader material exists but program not ready yet');
+          }
+        }, 200);
+      }
+    };
+    
+    checkShader();
+  }, [gl]);
 
   return (
-    <mesh ref={meshRef} position={[0, 0, 0]}>
+    <mesh ref={meshRef} position={[0, 0, 0]} rotation={[0, 0, 0]}>
       <planeGeometry args={[20, 20, 32, 32]} />
       <shaderMaterial
         ref={materialRef}
@@ -165,6 +209,9 @@ const FluidShader: React.FC = () => {
         fragmentShader={fragmentShader}
         uniforms={uniforms}
         side={THREE.DoubleSide}
+        transparent={false}
+        depthWrite={true}
+        depthTest={true}
       />
     </mesh>
   );

@@ -28,7 +28,8 @@ const Scene: React.FC = () => {
   // Only show error if Canvas failed to initialize after a reasonable timeout
   useEffect(() => {
     if (!canvasInitialized && !webglError) {
-      // Give Canvas 5 seconds to initialize before showing error (increased from 3)
+      // Give Canvas 8 seconds to initialize before showing error
+      // This gives more time for React Three Fiber to set up
       const timeout = setTimeout(() => {
         if (!canvasInitialized) {
           // Check if Canvas actually exists and has context
@@ -36,17 +37,26 @@ const Scene: React.FC = () => {
           if (canvas) {
             const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
             if (!gl) {
+              console.error('❌ Canvas exists but no WebGL context found');
               setWebglError('WebGL context creation failed');
             } else {
               // Canvas exists and has context, but onCreated wasn't called
-              // This might be a timing issue, give it more time
-              console.warn('⚠️ Canvas exists but not initialized yet');
+              // This might be a timing issue - don't show error yet
+              console.warn('⚠️ Canvas exists with context but onCreated not called yet - waiting...');
+              // Give it another 3 seconds
+              setTimeout(() => {
+                if (!canvasInitialized) {
+                  console.error('❌ onCreated still not called after extended wait');
+                  setWebglError('Canvas initialization timeout - onCreated not called');
+                }
+              }, 3000);
             }
           } else {
-            setWebglError('Canvas initialization timeout');
+            console.error('❌ No canvas element found');
+            setWebglError('Canvas initialization timeout - no canvas element');
           }
         }
-      }, 5000); // Increased timeout to 5 seconds
+      }, 8000); // Increased timeout to 8 seconds
       
       return () => clearTimeout(timeout);
     }
@@ -80,63 +90,13 @@ const Scene: React.FC = () => {
     <div className={`fixed inset-0 z-0 transition-opacity duration-[1500ms] ${phase === AppPhase.MORPHING ? 'opacity-0' : 'opacity-100'}`} style={{ width: '100%', height: '100%' }}>
       <Canvas 
         camera={{ position: [0, 0, 5], fov: 75 }}
-        gl={(canvas) => {
-          try {
-            // Manual WebGL context creation with fallbacks
-            const contextAttributes: WebGLContextAttributes = {
-              antialias: true,
-              alpha: false,
-              depth: true,
-              stencil: false,
-              preserveDrawingBuffer: false,
-              failIfMajorPerformanceCaveat: false,
-              premultipliedAlpha: false,
-              desynchronized: false
-            };
-            
-            // Try WebGL2 first
-            let gl: WebGLRenderingContext | null = canvas.getContext('webgl2', contextAttributes);
-            
-            // Fallback to WebGL1
-            if (!gl) {
-              gl = canvas.getContext('webgl', contextAttributes);
-            }
-            
-            // Fallback to experimental-webgl
-            if (!gl) {
-              gl = canvas.getContext('experimental-webgl', contextAttributes);
-            }
-            
-            // Try with minimal settings
-            if (!gl) {
-              const minimalAttrs: WebGLContextAttributes = {
-                alpha: false,
-                depth: true,
-                failIfMajorPerformanceCaveat: false
-              };
-              gl = canvas.getContext('webgl', minimalAttrs) || 
-                   canvas.getContext('experimental-webgl', minimalAttrs);
-            }
-            
-            if (!gl) {
-              const errorMsg = '无法创建 WebGL 上下文';
-              console.error('❌', errorMsg);
-              // Use setTimeout to update state after render
-              setTimeout(() => {
-                setWebglError(errorMsg);
-              }, 0);
-              throw new Error(errorMsg);
-            }
-            
-            console.log('✅ WebGL context created:', gl.getParameter(gl.VERSION));
-            return gl;
-          } catch (error) {
-            console.error('❌ WebGL context creation error:', error);
-            setTimeout(() => {
-              setWebglError('WebGL 上下文创建失败: ' + (error instanceof Error ? error.message : String(error)));
-            }, 0);
-            throw error;
-          }
+        gl={{
+          antialias: true,
+          alpha: false,
+          depth: true,
+          stencil: false,
+          preserveDrawingBuffer: false,
+          failIfMajorPerformanceCaveat: false
         }}
         dpr={Math.min(window.devicePixelRatio || 1, 2)}
         style={{ width: '100%', height: '100%', display: 'block' }}
@@ -147,13 +107,17 @@ const Scene: React.FC = () => {
               throw new Error('Invalid WebGL context');
             }
             
-            // Mark Canvas as initialized
+            // Mark Canvas as initialized - THIS IS CRITICAL
             setCanvasInitialized(true);
             setWebglError(null); // Clear any previous error
             
             // Set clear color and clear the canvas
             gl.setClearColor('#000000', 1);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            
+            // Enable depth testing for proper rendering
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
             
             // Log WebGL info for debugging
             try {
@@ -177,6 +141,9 @@ const Scene: React.FC = () => {
               }
               
               console.log('✅ Canvas initialized successfully');
+              console.log('✅ Scene objects:', scene.children.length);
+              console.log('✅ Camera position:', camera.position);
+              console.log('✅ Background fluid effect should render now');
             } catch (logError) {
               console.warn('⚠️ Could not log WebGL info:', logError);
             }
@@ -188,6 +155,10 @@ const Scene: React.FC = () => {
           }
         }}
         frameloop="always"
+        onError={(error) => {
+          console.error('❌ Canvas error:', error);
+          setWebglError('Canvas 错误: ' + (error?.message || '未知错误'));
+        }}
       >
         <Suspense fallback={null}>
           <FluidShader />
