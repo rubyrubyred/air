@@ -80,18 +80,65 @@ const Scene: React.FC = () => {
     <div className={`fixed inset-0 z-0 transition-opacity duration-[1500ms] ${phase === AppPhase.MORPHING ? 'opacity-0' : 'opacity-100'}`} style={{ width: '100%', height: '100%' }}>
       <Canvas 
         camera={{ position: [0, 0, 5], fov: 75 }}
-        gl={{
-          antialias: true,
-          alpha: false,
-          depth: true,
-          stencil: false,
-          preserveDrawingBuffer: false,
-          powerPreference: 'default', // Use 'default' instead of 'high-performance' for better compatibility
-          failIfMajorPerformanceCaveat: false,
-          premultipliedAlpha: false,
-          desynchronized: false
+        gl={(canvas) => {
+          try {
+            // Manual WebGL context creation with fallbacks
+            const contextAttributes: WebGLContextAttributes = {
+              antialias: true,
+              alpha: false,
+              depth: true,
+              stencil: false,
+              preserveDrawingBuffer: false,
+              failIfMajorPerformanceCaveat: false,
+              premultipliedAlpha: false,
+              desynchronized: false
+            };
+            
+            // Try WebGL2 first
+            let gl: WebGLRenderingContext | null = canvas.getContext('webgl2', contextAttributes);
+            
+            // Fallback to WebGL1
+            if (!gl) {
+              gl = canvas.getContext('webgl', contextAttributes);
+            }
+            
+            // Fallback to experimental-webgl
+            if (!gl) {
+              gl = canvas.getContext('experimental-webgl', contextAttributes);
+            }
+            
+            // Try with minimal settings
+            if (!gl) {
+              const minimalAttrs: WebGLContextAttributes = {
+                alpha: false,
+                depth: true,
+                failIfMajorPerformanceCaveat: false
+              };
+              gl = canvas.getContext('webgl', minimalAttrs) || 
+                   canvas.getContext('experimental-webgl', minimalAttrs);
+            }
+            
+            if (!gl) {
+              const errorMsg = '无法创建 WebGL 上下文';
+              console.error('❌', errorMsg);
+              // Use setTimeout to update state after render
+              setTimeout(() => {
+                setWebglError(errorMsg);
+              }, 0);
+              throw new Error(errorMsg);
+            }
+            
+            console.log('✅ WebGL context created:', gl.getParameter(gl.VERSION));
+            return gl;
+          } catch (error) {
+            console.error('❌ WebGL context creation error:', error);
+            setTimeout(() => {
+              setWebglError('WebGL 上下文创建失败: ' + (error instanceof Error ? error.message : String(error)));
+            }, 0);
+            throw error;
+          }
         }}
-        dpr={Math.min(window.devicePixelRatio, 2)}
+        dpr={Math.min(window.devicePixelRatio || 1, 2)}
         style={{ width: '100%', height: '100%', display: 'block' }}
         onCreated={({ gl, scene, camera }) => {
           try {
@@ -140,10 +187,7 @@ const Scene: React.FC = () => {
             setWebglError('Canvas 初始化失败: ' + errorMessage);
           }
         }}
-        onError={(error) => {
-          console.error('❌ Canvas error event:', error);
-          setWebglError('Canvas 错误: ' + (error?.message || '未知错误'));
-        }}
+        frameloop="always"
       >
         <Suspense fallback={null}>
           <FluidShader />
