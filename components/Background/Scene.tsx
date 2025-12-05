@@ -7,23 +7,50 @@ import { AppPhase } from '../../types';
 const Scene: React.FC = () => {
   const phase = useStore(s => s.phase);
   const [webglError, setWebglError] = useState<string | null>(null);
+  const [canvasInitialized, setCanvasInitialized] = useState(false);
 
+  // Only show error if Canvas failed to initialize after a reasonable timeout
   useEffect(() => {
-    // Check WebGL support
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    if (!gl) {
-      setWebglError('WebGL not supported');
-      console.error('WebGL is not supported in this browser');
+    if (!canvasInitialized && !webglError) {
+      // Give Canvas 3 seconds to initialize before showing error
+      const timeout = setTimeout(() => {
+        if (!canvasInitialized) {
+          // Check if Canvas actually exists and has context
+          const canvas = document.querySelector('canvas');
+          if (canvas) {
+            const gl = canvas.getContext('webgl') || canvas.getContext('webgl2');
+            if (!gl) {
+              setWebglError('WebGL context creation failed');
+            }
+          } else {
+            setWebglError('Canvas initialization timeout');
+          }
+        }
+      }, 3000);
+      
+      return () => clearTimeout(timeout);
     }
-  }, []);
+  }, [canvasInitialized, webglError]);
 
   if (webglError) {
     return (
       <div className="fixed inset-0 z-0 bg-black flex items-center justify-center">
         <div className="text-white text-center p-8">
-          <p className="text-lg mb-2">WebGL 不支持</p>
-          <p className="text-sm text-white/60">您的浏览器不支持 WebGL，请使用现代浏览器访问</p>
+          <p className="text-lg mb-2">WebGL 初始化失败</p>
+          <p className="text-sm text-white/60 mb-4">
+            {webglError === 'WebGL context creation failed' 
+              ? '无法创建 WebGL 上下文，请检查浏览器设置'
+              : 'WebGL 初始化超时，请刷新页面重试'}
+          </p>
+          <p className="text-xs text-white/40 mb-4">
+            建议使用 Chrome、Firefox、Edge 或 Safari 的最新版本
+          </p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded text-sm transition-colors"
+          >
+            刷新页面
+          </button>
         </div>
       </div>
     );
@@ -43,19 +70,36 @@ const Scene: React.FC = () => {
         style={{ width: '100%', height: '100%', display: 'block' }}
         onCreated={({ gl, scene }) => {
           try {
+            // Mark Canvas as initialized
+            setCanvasInitialized(true);
+            setWebglError(null); // Clear any previous error
+            
             gl.setClearColor('#000000', 1);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             
             // Log WebGL info for debugging
-            const debugInfo = gl.getParameter(gl.DEBUG_RENDERER_INFO);
-            if (debugInfo) {
-              console.log('WebGL Renderer:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
-              console.log('WebGL Vendor:', gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL));
+            try {
+              const debugInfo = gl.getParameter(gl.DEBUG_RENDERER_INFO);
+              if (debugInfo) {
+                const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                console.log('✅ WebGL Renderer:', renderer);
+                console.log('✅ WebGL Vendor:', vendor);
+              }
+            } catch (debugError) {
+              // Debug info might not be available in all contexts
+              console.log('✅ WebGL context created (debug info unavailable)');
             }
-            console.log('Canvas initialized successfully');
+            
+            const version = gl.getParameter(gl.VERSION);
+            const shadingLanguageVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+            console.log('✅ WebGL Version:', version);
+            console.log('✅ GLSL Version:', shadingLanguageVersion);
+            console.log('✅ Canvas initialized successfully');
           } catch (error) {
-            console.error('Canvas initialization error:', error);
-            setWebglError('Canvas initialization failed');
+            console.error('❌ Canvas initialization error:', error);
+            setCanvasInitialized(false);
+            setWebglError('Canvas initialization failed: ' + (error instanceof Error ? error.message : String(error)));
           }
         }}
       >
