@@ -102,50 +102,56 @@ const Scene: React.FC = () => {
         style={{ width: '100%', height: '100%', display: 'block' }}
         onCreated={({ gl, scene, camera }) => {
           try {
-            // Verify WebGL context is valid
-            if (!gl || !gl.getParameter) {
-              throw new Error('Invalid WebGL context');
+            // gl is Three.js WebGLRenderer, not native WebGL context
+            // Verify renderer is valid
+            if (!gl || typeof gl.setClearColor !== 'function') {
+              throw new Error('Invalid WebGL renderer');
             }
             
             // Mark Canvas as initialized - THIS IS CRITICAL
             setCanvasInitialized(true);
             setWebglError(null); // Clear any previous error
             
-            // Set clear color and clear the canvas
+            // Set clear color using Three.js API
             gl.setClearColor('#000000', 1);
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             
-            // Enable depth testing for proper rendering
-            gl.enable(gl.DEPTH_TEST);
-            gl.depthFunc(gl.LEQUAL);
+            // Get the actual WebGL context from the renderer for logging
+            const webglContext = gl.getContext() as WebGLRenderingContext | null;
             
             // Log WebGL info for debugging
             try {
-              const version = gl.getParameter(gl.VERSION);
-              const shadingLanguageVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
-              console.log('✅ WebGL Version:', version);
-              console.log('✅ GLSL Version:', shadingLanguageVersion);
-              
-              // Try to get debug info (may not be available in all browsers)
-              try {
-                const debugInfo = gl.getParameter(gl.DEBUG_RENDERER_INFO);
-                if (debugInfo) {
-                  const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-                  const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
-                  console.log('✅ WebGL Renderer:', renderer);
-                  console.log('✅ WebGL Vendor:', vendor);
+              if (webglContext) {
+                try {
+                  const version = webglContext.getParameter(webglContext.VERSION);
+                  const shadingLanguageVersion = webglContext.getParameter(webglContext.SHADING_LANGUAGE_VERSION);
+                  console.log('✅ WebGL Version:', version);
+                  console.log('✅ GLSL Version:', shadingLanguageVersion);
+                  
+                  // Try to get debug info (may not be available in all browsers)
+                  try {
+                    const debugInfo = webglContext.getParameter(webglContext.DEBUG_RENDERER_INFO);
+                    if (debugInfo) {
+                      const renderer = webglContext.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                      const vendor = webglContext.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                      console.log('✅ WebGL Renderer:', renderer);
+                      console.log('✅ WebGL Vendor:', vendor);
+                    }
+                  } catch (debugError) {
+                    // Debug info not available, that's okay
+                    console.log('ℹ️ Debug info unavailable (normal in some browsers)');
+                  }
+                } catch (webglError) {
+                  console.warn('⚠️ Could not access WebGL context info:', webglError);
                 }
-              } catch (debugError) {
-                // Debug info not available, that's okay
-                console.log('ℹ️ Debug info unavailable (normal in some browsers)');
               }
               
               console.log('✅ Canvas initialized successfully');
+              console.log('✅ Three.js Renderer:', gl.constructor.name);
               console.log('✅ Scene objects:', scene.children.length);
               console.log('✅ Camera position:', camera.position);
               console.log('✅ Background fluid effect should render now');
             } catch (logError) {
-              console.warn('⚠️ Could not log WebGL info:', logError);
+              console.warn('⚠️ Could not log renderer info:', logError);
             }
           } catch (error) {
             console.error('❌ Canvas initialization error:', error);
@@ -158,6 +164,16 @@ const Scene: React.FC = () => {
         onError={(error) => {
           console.error('❌ Canvas error:', error);
           setWebglError('Canvas 错误: ' + (error?.message || '未知错误'));
+        }}
+        onContextLost={(event) => {
+          console.error('❌ WebGL context lost:', event);
+          event.preventDefault(); // Try to prevent default behavior
+          setWebglError('WebGL 上下文丢失，请刷新页面');
+        }}
+        onContextRestored={() => {
+          console.log('✅ WebGL context restored');
+          setWebglError(null);
+          setCanvasInitialized(true);
         }}
       >
         <Suspense fallback={null}>
