@@ -66,48 +66,50 @@ const ReceiptCard: React.FC = () => {
       });
       
       // Convert to blob and download
-      canvas.toBlob((blob: Blob | null) => {
-        if (!blob) {
-          console.error('Failed to create blob');
-          setIsSaving(false);
-          return;
-        }
-        
-        // Create download link
-        const url = URL.createObjectURL(blob);
-        const fileName = `ETHER_${recipe.id || Date.now()}.png`;
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-        
-        // For mobile devices, try Web Share API first (if supported)
-        if (navigator.share && navigator.canShare) {
-          try {
-            const file = new File([blob], fileName, { type: 'image/png' });
-            const shareData: any = {
-              title: 'ETHER Recipe',
-              text: `ETHER Recipe - ${recipe.id}`
-            };
-            
-            // Check if files sharing is supported
-            if (navigator.canShare({ files: [file] })) {
-              shareData.files = [file];
-            }
-            
-            await navigator.share(shareData);
-            setIsSaving(false);
-            URL.revokeObjectURL(url);
-            return;
-          } catch (shareError) {
-            // If share fails or is cancelled, fall back to download
-            console.log('Share failed, falling back to download:', shareError);
-          }
-        }
-        
-        // Desktop or fallback: trigger download
-        triggerDownload(link, url);
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0);
+      });
+      
+      if (!blob) {
+        console.error('Failed to create blob');
         setIsSaving(false);
-      }, 'image/png', 1.0);
+        return;
+      }
+      
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const fileName = `ETHER_${recipe.id || Date.now()}.png`;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      
+      // For mobile devices, try Web Share API first (if supported)
+      if (navigator.share && navigator.canShare) {
+        try {
+          const file = new File([blob], fileName, { type: 'image/png' });
+          const shareData: any = {
+            title: 'ETHER Recipe',
+            text: `ETHER Recipe - ${recipe.id}`
+          };
+          
+          // Check if files sharing is supported
+          if (navigator.canShare({ files: [file] })) {
+            shareData.files = [file];
+          }
+          
+          await navigator.share(shareData);
+          setIsSaving(false);
+          URL.revokeObjectURL(url);
+          return;
+        } catch (shareError) {
+          // If share fails or is cancelled, fall back to download
+          console.log('Share failed, falling back to download:', shareError);
+        }
+      }
+      
+      // Desktop or fallback: trigger download
+      triggerDownload(link, url);
+      setIsSaving(false);
       
     } catch (error) {
       console.error('Error capturing image:', error);
