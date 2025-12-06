@@ -11,8 +11,22 @@ const TuningLayer: React.FC = () => {
   const { setCoordinates, setPhase, setRecipe } = useStore();
   
   const [isPressing, setIsPressing] = useState(false);
+  const [isMoving, setIsMoving] = useState(false);
+  const [isStationary, setIsStationary] = useState(false);
   
-  const handleMove = (clientX: number, clientY: number) => {
+  // Track movement for velocity calculation
+  const lastPositionRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const stationaryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const progressAnimationRef = useRef<gsap.core.Tween | null>(null);
+  const isMovingRef = useRef(false);
+  const isStationaryRef = useRef(false);
+  const touchStartTimeRef = useRef<number | null>(null);
+  
+  // Velocity threshold (pixels per millisecond) - adjust as needed
+  const VELOCITY_THRESHOLD = 0.5; // pixels/ms
+  const STATIONARY_TIME = 200; // milliseconds of no movement to be considered stationary
+  
+  const handleMove = (clientX: number, clientY: number, isClick = false) => {
     if (!containerRef.current) return;
     const { width, height, left, top } = containerRef.current.getBoundingClientRect();
     
@@ -25,36 +39,141 @@ const TuningLayer: React.FC = () => {
 
     setCoordinates(clampedX, clampedY);
 
+    // Calculate velocity if we have previous position
+    const now = Date.now();
+    let velocity = 0;
+    
+    if (lastPositionRef.current && !isClick) {
+      const dx = clientX - lastPositionRef.current.x;
+      const dy = clientY - lastPositionRef.current.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const timeDelta = now - lastPositionRef.current.time;
+      velocity = timeDelta > 0 ? distance / timeDelta : 0;
+    }
+    
+    // Update last position
+    lastPositionRef.current = { x: clientX, y: clientY, time: now };
+    
+    // Check if moving (only if not a click)
+    if (!isClick) {
+      const moving = velocity > VELOCITY_THRESHOLD;
+      setIsMoving(moving);
+      isMovingRef.current = moving;
+      
+      // If moving, reset stationary timer and stop progress
+      if (moving) {
+        setIsStationary(false);
+        isStationaryRef.current = false;
+        setIsPressing(false); // Stop pressing if moving
+        if (stationaryTimerRef.current) {
+          clearTimeout(stationaryTimerRef.current);
+          stationaryTimerRef.current = null;
+        }
+        // Stop progress if moving
+        if (progressAnimationRef.current) {
+          progressAnimationRef.current.kill();
+          progressAnimationRef.current = null;
+          if (progressRef.current) {
+            gsap.to(progressRef.current, { strokeDashoffset: 126, duration: 0.3, overwrite: true });
+          }
+        }
+      } else {
+        // Not moving, start stationary timer
+        if (stationaryTimerRef.current) {
+          clearTimeout(stationaryTimerRef.current);
+        }
+        stationaryTimerRef.current = setTimeout(() => {
+          setIsStationary(true);
+          isStationaryRef.current = true;
+          // If pressing and now stationary, allow progress
+          if (isPressing) {
+            // Progress will start automatically via useEffect
+          }
+        }, STATIONARY_TIME);
+      }
+    } else {
+      // For clicks, assume stationary immediately
+      setIsMoving(false);
+      isMovingRef.current = false;
+      setIsStationary(true);
+      isStationaryRef.current = true;
+    }
+
+    // Move cursor - faster for clicks, smooth for drags
     if (cursorRef.current) {
       gsap.to(cursorRef.current, {
         x: clientX - left,
         y: clientY - top,
-        duration: 0.15, // Slightly faster for clearer "flat" feel
-        ease: 'power2.out'
+        duration: isClick ? 0.1 : 0.15,
+        ease: isClick ? 'power2.out' : 'power2.out'
       });
     }
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    handleMove(e.clientX, e.clientY);
+    handleMove(e.clientX, e.clientY, false);
   };
 
-  const onPointerDown = () => {
-    setIsPressing(true);
+  const onPointerDown = (e: React.PointerEvent) => {
+    // On touch/click, immediately move cursor to that position
+    touchStartTimeRef.current = Date.now();
+    
+    // Reset movement tracking for new touch
+    lastPositionRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+    
+    // Move cursor immediately to clicked position
+    handleMove(e.clientX, e.clientY, true);
+    
+    // Check current state using refs for latest values
+    const wasStationary = isStationaryRef.current;
+    const wasMoving = isMovingRef.current;
+    
+    // If was stationary and not moving, allow pressing immediately
+    if (wasStationary && !wasMoving) {
+      setIsPressing(true);
+    } else {
+      // Otherwise, wait a bit to check if we're stationary
+      setIsPressing(false);
+      setTimeout(() => {
+        // Check if still stationary after delay (using refs for latest values)
+        if (isStationaryRef.current && !isMovingRef.current) {
+          setIsPressing(true);
+        }
+      }, STATIONARY_TIME);
+    }
   };
 
   const onPointerUp = () => {
     setIsPressing(false);
+    setIsMoving(false);
+    setIsStationary(false);
+    isMovingRef.current = false;
+    isStationaryRef.current = false;
+    touchStartTimeRef.current = null;
+    
+    if (stationaryTimerRef.current) {
+      clearTimeout(stationaryTimerRef.current);
+      stationaryTimerRef.current = null;
+    }
+    
+    if (progressAnimationRef.current) {
+      progressAnimationRef.current.kill();
+      progressAnimationRef.current = null;
+    }
+    
     if (progressRef.current) {
       gsap.to(progressRef.current, { strokeDashoffset: 126, duration: 0.3, overwrite: true });
     }
   };
 
   useEffect(() => {
-    let animation: gsap.core.Tween;
-
-    if (isPressing) {
-      animation = gsap.to(progressRef.current, {
+    // Only start progress if pressing AND stationary AND not moving
+    if (isPressing && isStationary && !isMoving) {
+      if (progressAnimationRef.current) {
+        progressAnimationRef.current.kill();
+      }
+      
+      progressAnimationRef.current = gsap.to(progressRef.current, {
         strokeDashoffset: 0,
         duration: 1.5,
         ease: 'power1.inOut',
@@ -66,14 +185,39 @@ const TuningLayer: React.FC = () => {
           setTimeout(() => {
             setPhase(AppPhase.MANIFESTATION);
           }, 1500);
+          progressAnimationRef.current = null;
         }
       });
+    } else {
+      // Stop progress if conditions not met
+      if (progressAnimationRef.current) {
+        progressAnimationRef.current.kill();
+        progressAnimationRef.current = null;
+        if (progressRef.current) {
+          gsap.to(progressRef.current, { strokeDashoffset: 126, duration: 0.3, overwrite: true });
+        }
+      }
     }
 
     return () => {
-      if (animation) animation.kill();
+      if (progressAnimationRef.current) {
+        progressAnimationRef.current.kill();
+        progressAnimationRef.current = null;
+      }
     };
-  }, [isPressing, setPhase, setRecipe]);
+  }, [isPressing, isStationary, isMoving, setPhase, setRecipe]);
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (stationaryTimerRef.current) {
+        clearTimeout(stationaryTimerRef.current);
+      }
+      if (progressAnimationRef.current) {
+        progressAnimationRef.current.kill();
+      }
+    };
+  }, []);
 
   return (
     <div 
