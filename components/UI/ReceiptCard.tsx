@@ -54,16 +54,55 @@ const ReceiptCard: React.FC = () => {
       // Load html2canvas
       const html2canvas = await loadHtml2Canvas();
       
-      // Capture the card as canvas
-      const canvas = await html2canvas(cardRef.current, {
-        backgroundColor: '#000000',
-        scale: 2, // Higher quality for retina displays
+      // Get WebGL canvas element
+      const webglCanvas = document.querySelector('canvas') as HTMLCanvasElement;
+      
+      // Create a composite canvas with the same dimensions as the viewport
+      const scale = 2; // Higher quality for retina displays
+      const compositeCanvas = document.createElement('canvas');
+      compositeCanvas.width = window.innerWidth * scale;
+      compositeCanvas.height = window.innerHeight * scale;
+      const compositeCtx = compositeCanvas.getContext('2d');
+      if (!compositeCtx) {
+        throw new Error('Failed to create composite canvas context');
+      }
+      
+      // Fill with black background first
+      compositeCtx.fillStyle = '#000000';
+      compositeCtx.fillRect(0, 0, compositeCanvas.width, compositeCanvas.height);
+      
+      // Draw WebGL background if available
+      if (webglCanvas) {
+        try {
+          // WebGL canvas should have preserveDrawingBuffer: true
+          compositeCtx.drawImage(webglCanvas, 0, 0, compositeCanvas.width, compositeCanvas.height);
+        } catch (e) {
+          console.warn('Could not draw WebGL canvas:', e);
+          // If WebGL canvas can't be drawn, just keep black background
+        }
+      }
+      
+      // Capture the card with html2canvas
+      const cardCanvas = await html2canvas(cardRef.current, {
+        backgroundColor: null, // Transparent background since we'll composite it
+        scale: scale,
         useCORS: true,
         logging: false,
         allowTaint: false,
         width: cardRef.current.offsetWidth,
         height: cardRef.current.offsetHeight
       });
+      
+      // Calculate card position (centered)
+      const cardRect = cardRef.current.getBoundingClientRect();
+      const cardX = (cardRect.left * scale);
+      const cardY = (cardRect.top * scale);
+      
+      // Draw the card on top of the background
+      compositeCtx.drawImage(cardCanvas, cardX, cardY);
+      
+      // Use the composite canvas as the final result
+      const canvas = compositeCanvas;
       
       // Convert to blob and download
       const blob = await new Promise<Blob | null>((resolve) => {

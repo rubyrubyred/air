@@ -95,7 +95,7 @@ const Scene: React.FC = () => {
           alpha: false,
           depth: true,
           stencil: false,
-          preserveDrawingBuffer: false,
+          preserveDrawingBuffer: true, // Enable to capture WebGL content for screenshots
           failIfMajorPerformanceCaveat: false
         }}
         dpr={Math.min(window.devicePixelRatio || 1, 2)}
